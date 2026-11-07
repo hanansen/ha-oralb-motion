@@ -1,4 +1,7 @@
-\# Oral-B Motion
+!!!
+The “Long axis of brush” dropdown on the panel defaults to y, and the pitch/roll sensors use a provisional axis mapping, so the visualization may be oriented wrongly on a different model until the axes are calibrated.
+!!!
+
 
 Home Assistant custom integration that streams live motion data (accelerometer and gyro) from Oral-B iO toothbrushes over Bluetooth, with a live 3D tilt view in the sidebar.
 

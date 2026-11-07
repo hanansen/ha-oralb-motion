@@ -1,0 +1,15 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Oral-B Motion",
+        "description": "Wake the brush (press power) first, then pick it.",
+        "data": { "address": "Brush" }
+      }
+    },
+    "abort": {
+      "no_devices_found": "No awake Oral-B brush found. Press the power button and try again.",
+      "already_configured": "This brush is already set up."
+    }
+  }
+}

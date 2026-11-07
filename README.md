@@ -50,3 +50,6 @@ Close the Oral-B app first: the brush only accepts one connection at a time.
 
 \- Written from public reverse-engineering notes, not affiliated with Oral-B or P\&G
 
+
+<img width="426" height="374" alt="image" src="https://github.com/user-attachments/assets/79d22804-f395-4f04-aafb-30ff5c7f6c7c" />
+

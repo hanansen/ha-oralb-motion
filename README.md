@@ -7,7 +7,9 @@ Inspired by \[Abhay Kashyap's "Teethmaxxing" post](https://abhay.fyi/teethmaxxin
 \## Features
 
 \- Sidebar panel with a live tilt visualisation of the brush
+
 \- "Live motion stream" switch, plus provisional pitch and roll sensors (1 Hz)
+
 \- Attaches to the brush's device from the core Oral-B integration
 
 \## Requirements

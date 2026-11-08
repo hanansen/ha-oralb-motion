@@ -39,7 +39,8 @@ Close any other app connected to the brush (the Oral-B phone app, nRF Connect, e
 
 \- Written from public reverse-engineering notes, not affiliated with Oral-B or P\&G
 
-<img width="426" height="374" alt="image" src="https://github.com/user-attachments/assets/79d22804-f395-4f04-aafb-30ff5c7f6c7c" />
+<img width="794" height="576" alt="image" src="https://github.com/user-attachments/assets/55c23995-d5d6-4d76-9806-1b3b1ff538d9" />
+
 
 
 I don't know what I am doing on a daily basis, but it's fun.

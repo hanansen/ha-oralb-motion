@@ -15,6 +15,7 @@ from .const import DOMAIN, PANEL_URL, STATIC_URL
 from .hub import OralBMotionHub
 
 PLATFORMS = [Platform.SENSOR, Platform.SWITCH]
+CARD_URL = f"{STATIC_URL}/oralb-motion-card.js"  # NEW
 
 
 @websocket_api.websocket_command(
@@ -51,6 +52,9 @@ async def _ensure_frontend(hass: HomeAssistant) -> None:
             [StaticPathConfig(STATIC_URL, str(Path(__file__).parent / "frontend"), False)]
         )
         st["static"] = True
+    if not st.get("card"):  # NEW
+        frontend.add_extra_js_url(hass, CARD_URL)  # NEW
+        st["card"] = True  # NEW
     if not st.get("panel"):
         await panel_custom.async_register_panel(
             hass,
@@ -81,5 +85,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ]
         if not others:
             frontend.async_remove_panel(hass, PANEL_URL)
-            hass.data[f"{DOMAIN}_state"]["panel"] = False
+            st = hass.data[f"{DOMAIN}_state"]
+            st["panel"] = False
+            if st.get("card"):  # NEW
+                frontend.remove_extra_js_url(hass, CARD_URL)  # NEW
+                st["card"] = False  # NEW
     return ok

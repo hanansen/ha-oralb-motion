@@ -1,12 +1,12 @@
 {
   "domain": "oralb_motion",
   "name": "Oral-B Motion",
-  "version": "0.2.0",
-  "codeowners": ["@thisaintitcheif"],
+  "version": "0.3.0",
+  "codeowners": ["@hanansen"],
   "config_flow": true,
   "dependencies": ["bluetooth", "http", "websocket_api", "panel_custom"],
-  "documentation": "https://github.com/thisaintitcheif/ha-oralb-motion",
-  "issue_tracker": "https://github.com/thisaintitcheif/ha-oralb-motion/issues",
+  "documentation": "https://github.com/hanansen/ha-oralb-motion",
+  "issue_tracker": "https://github.com/hanansen/ha-oralb-motion/issues",
   "integration_type": "device",
   "iot_class": "local_push"
 }

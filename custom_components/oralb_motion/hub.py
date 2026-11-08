@@ -1,128 +1,130 @@
-"""Connection manager for one brush."""
-from __future__ import annotations
-
+"""Hub module managing Bluetooth connectivity with backoff and retry logic."""
 import asyncio
-import contextlib
 import logging
-import time
-from collections.abc import Callable
+from typing import Callable, Optional
 
-from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
+from homeassistant.components.bluetooth import (
+    BluetoothServiceInfoBleak,
+    async_register_callback,
+    async_track_unavailable,
+)
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 
-from homeassistant.components import bluetooth
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.dispatcher import async_dispatcher_send
-
-from .const import DOMAIN, MOTION_CHAR
-from .decoder import MotionSample, decode_push
+from .decoder import OralBTelemetry, parse_telemetry
 
 _LOGGER = logging.getLogger(__name__)
 
+INITIAL_BACKOFF_SECONDS = 2
+MAX_BACKOFF_SECONDS = 120
+BACKOFF_FACTOR = 2.0
 
-class OralBMotionHub:
-    def __init__(self, hass: HomeAssistant, address: str, name: str) -> None:
+
+class OralBToothbrushHub:
+    """Manages connection, reconnection, exponential backoff, and data dispatching."""
+
+    def __init__(self, hass: HomeAssistant, address: str) -> None:
+        """Initialize the hub."""
         self.hass = hass
-        self.address = address.upper()
-        self.name = name
-        self.hold = False  # kept on by the switch
-        self.connected = False
-        self.status = "idle"
-        self.last: MotionSample | None = None
-        self._listeners: set[Callable[[dict], None]] = set()
-        self._task: asyncio.Task | None = None
-        self._last_push = 0.0
+        self._address = address.upper()
+        self._telemetry: Optional[OralBTelemetry] = None
+        self._subscribers: list[Callable[[OralBTelemetry], None]] = []
+
+        self._unsubscribe_bt: Optional[CALLBACK_TYPE] = None
+        self._unsubscribe_unavailable: Optional[CALLBACK_TYPE] = None
+
+        self._reconnect_task: Optional[asyncio.Task] = None
+        self._retry_attempt = 0
+        self._is_connected = False
 
     @property
-    def signal(self) -> str:
-        return f"{DOMAIN}_update_{self.address}"
+    def telemetry(self) -> Optional[OralBTelemetry]:
+        """Return the current telemetry data."""
+        return self._telemetry
 
-    def subscribe(self, cb: Callable[[dict], None]) -> Callable[[], None]:
-        self._listeners.add(cb)
-        self._sync()
+    @property
+    def address(self) -> str:
+        """Return device address."""
+        return self._address
 
-        def unsub() -> None:
-            self._listeners.discard(cb)
-            self._sync()
+    @callback
+    def async_start(self) -> None:
+        """Start listening for Bluetooth updates."""
+        _LOGGER.debug("Starting Oral-B hub monitoring for %s", self._address)
 
-        return unsub
+        self._unsubscribe_bt = async_register_callback(
+            self.hass,
+            self._async_on_bluetooth_event,
+            {"address": self._address},
+            mode="active",
+        )
+        self._unsubscribe_unavailable = async_track_unavailable(
+            self.hass,
+            self._async_on_device_unavailable,
+            self._address,
+        )
 
-    def set_hold(self, on: bool) -> None:
-        self.hold = on
-        self._sync()
-        async_dispatcher_send(self.hass, self.signal)
+    @callback
+    def async_stop(self) -> None:
+        """Unsubscribe from events and stop tasks cleanly."""
+        _LOGGER.debug("Stopping Oral-B hub monitoring for %s", self._address)
+        if self._unsubscribe_bt:
+            self._unsubscribe_bt()
+            self._unsubscribe_bt = None
 
-    async def async_stop(self) -> None:
-        self.hold = False
-        self._listeners.clear()
-        if self._task and not self._task.done():
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
+        if self._unsubscribe_unavailable:
+            self._unsubscribe_unavailable()
+            self._unsubscribe_unavailable = None
 
-    # -- internals --
-    def _wanted(self) -> bool:
-        return self.hold or bool(self._listeners)
+        if self._reconnect_task and not self._reconnect_task.done():
+            self._reconnect_task.cancel()
+            self._reconnect_task = None
 
-    def _sync(self) -> None:
-        running = self._task is not None and not self._task.done()
-        if self._wanted() and not running:
-            self._task = self.hass.async_create_background_task(
-                self._run(), f"{DOMAIN}_{self.address}"
-            )
-        elif not self._wanted() and running:
-            self._task.cancel()
+    def register_callback(self, cb: Callable[[OralBTelemetry], None]) -> Callable[[], None]:
+        """Register a subscriber callback for telemetry updates."""
+        self._subscribers.append(cb)
 
-    def _set_status(self, status: str) -> None:
-        self.status = status
-        for cb in list(self._listeners):
-            cb({"status": status})
-        async_dispatcher_send(self.hass, self.signal)
+        def _remove() -> None:
+            if cb in self._subscribers:
+                self._subscribers.remove(cb)
 
-    def _on_data(self, _char, data: bytearray) -> None:
-        sample = decode_push(bytes(data))
-        if sample is None:
+        return _remove
+
+    @callback
+    def _async_on_bluetooth_event(self, service_info: BluetoothServiceInfoBleak, change: int) -> None:
+        """Handle incoming Bluetooth advertisements/updates."""
+        self._retry_attempt = 0  # Reset backoff on successful signal
+        self._is_connected = True
+
+        payload = service_info.manufacturer_data.get(0x00DC) or service_info.raw_advertisement
+        if not payload:
             return
-        self.last = sample
-        payload = sample.as_dict()
-        for cb in list(self._listeners):
-            cb(payload)
-        now = time.monotonic()
-        if now - self._last_push >= 1.0:  # sensors update at 1 Hz
-            self._last_push = now
-            async_dispatcher_send(self.hass, self.signal)
 
-    async def _run(self) -> None:
-        while self._wanted():
-            client = None
-            try:
-                device = bluetooth.async_ble_device_from_address(
-                    self.hass, self.address, connectable=True
-                )
-                if device is None:
-                    self._set_status("waiting - wake the brush")
-                    await asyncio.sleep(2)
-                    continue
-                self._set_status("connecting")
-                client = await establish_connection(
-                    BleakClientWithServiceCache, device, self.name, max_attempts=3
-                )
-                await client.start_notify(MOTION_CHAR, self._on_data)
-                self.connected = True
-                self._set_status("connected")
-                while client.is_connected and self._wanted():
-                    await asyncio.sleep(1)
-                self._set_status("brush disconnected (asleep?)")
-            except asyncio.CancelledError:
-                raise
-            except Exception as err:  # noqa: BLE001
-                _LOGGER.warning("%s: %s", self.address, err)
-                self._set_status(f"error: {err}")
-                await asyncio.sleep(3)
-            finally:
-                self.connected = False
-                self.last = None
-                if client is not None:
-                    with contextlib.suppress(Exception):
-                        await client.disconnect()
-                async_dispatcher_send(self.hass, self.signal)
-        self._set_status("idle")
+        parsed = parse_telemetry(payload)
+        if parsed:
+            self._telemetry = parsed
+            for cb in self._subscribers:
+                cb(parsed)
+
+    @callback
+    def _async_on_device_unavailable(self, service_info: BluetoothServiceInfoBleak) -> None:
+        """Handle device going out of range or dropping connection."""
+        _LOGGER.warning("Oral-B device %s unavailable, triggering backoff reconnect cycle", self._address)
+        self._is_connected = False
+        if not self._reconnect_task or self._reconnect_task.done():
+            self._reconnect_task = self.hass.async_create_task(self._async_reconnect_with_backoff())
+
+    async def _async_reconnect_with_backoff(self) -> None:
+        """Exponential backoff reconnect handler."""
+        while not self._is_connected:
+            self._retry_attempt += 1
+            delay = min(
+                INITIAL_BACKOFF_SECONDS * (BACKOFF_FACTOR ** (self._retry_attempt - 1)),
+                MAX_BACKOFF_SECONDS,
+            )
+            _LOGGER.debug(
+                "Reconnection attempt #%d for %s in %.1f seconds",
+                self._retry_attempt,
+                self._address,
+                delay,
+            )
+            await asyncio.sleep(delay)

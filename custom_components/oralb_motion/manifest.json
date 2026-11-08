@@ -1,7 +1,7 @@
 {
   "domain": "oralb_motion",
   "name": "Oral-B Motion",
-  "version": "0.4.0",
+  "version": "0.7.0",
   "codeowners": ["@hanansen"],
   "config_flow": true,
   "dependencies": ["bluetooth", "http", "websocket_api", "panel_custom"],
